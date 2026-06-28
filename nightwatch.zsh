@@ -26,11 +26,13 @@ typeset -g NIGHTWATCH_STATE_DIR="${NIGHTWATCH_STATE_DIR:-$HOME/.nightwatch}"
 typeset -g NIGHTWATCH_IDLE_SECONDS="${NIGHTWATCH_IDLE_SECONDS:-900}"
 typeset -g NIGHTWATCH_INTERVAL_SECONDS="${NIGHTWATCH_INTERVAL_SECONDS:-60}"
 typeset -g NIGHTWATCH_CPU_DELTA_CS="${NIGHTWATCH_CPU_DELTA_CS:-50}"
-# Dead-man backstop for away mode: its caffeinate is given a -t timeout of
-# (deadline - now + this grace) so it self-expires even if the watchdog process
-# dies, instead of pinning the Mac awake forever. The grace preserves "stay awake
-# past the deadline while work is still active" up to this margin. Accepts a
-# duration (4h/30m/seconds); set to 0 to disable the backstop.
+# Dead-man backstop for timed auto modes (away, or goal --max): their caffeinate
+# is given a -t timeout of (deadline - now + this grace) so it self-expires even
+# if the watchdog process dies, instead of pinning the Mac awake forever. The
+# grace is slack on that self-expiry: away uses it to keep going past its deadline
+# while work is still active; for the goal --max hard cap (which sleeps AT the
+# deadline) it only bounds how far a dead watchdog can overshoot. Accepts a
+# duration (4h/30m/seconds); set to 0 to disable.
 typeset -g NIGHTWATCH_BACKSTOP_GRACE="${NIGHTWATCH_BACKSTOP_GRACE:-14400}"
 
 # Prefer zsh's own strftime for epoch formatting so we don't depend on BSD
@@ -478,6 +480,20 @@ _nightwatch_watchdog() {
     sleep_pid=""
     now="$(_nightwatch_now)"
 
+    # Hard ceiling for goal --max: sleep at the deadline regardless of activity.
+    # Checked before activity detection precisely so an always-busy agent (or many
+    # idle-but-connected sessions) can't keep the Mac awake past the cap.
+    if [[ "$mode" == "goal" ]] && (( deadline > 0 && now >= deadline )); then
+      _nightwatch_log "goal mode max window reached; sleeping"
+      _nightwatch_stop_caffeinate
+      _nightwatch_clear_auto_state
+      _nightwatch_state_set mode "off"
+      _nightwatch_state_set phase "off"
+      _nightwatch_state_set last_reason "goal max window ended; Mac can sleep"
+      _nightwatch_state_rm watchdog_pid
+      exit 0
+    fi
+
     if reason="$(_nightwatch_detect_activity)"; then
       last_active="$now"
       _nightwatch_state_set last_active_at "$last_active"
@@ -538,11 +554,10 @@ _nightwatch_start_auto() {
   interval="$4"
 
   _nightwatch_stop_watchdog
-  # Backstop away mode only: its watchdog sleeps at the deadline, so a -t bounded
-  # to deadline+grace aligns with intended behavior. goal mode stays awake purely
-  # by activity (no deadline-driven sleep), so a -t there could sleep the Mac
-  # mid-work if the watchdog outlived it.
-  if [[ "$mode" == "away" ]] && bt="$(_nightwatch_backstop_t "$deadline")"; then
+  # Backstop any timed auto mode (away, or goal --max): both sleep at/by their
+  # deadline, so a -t bounded to deadline+grace aligns with intended behavior and
+  # self-expires if the watchdog dies. Untimed goal (deadline 0) gets no -t.
+  if bt="$(_nightwatch_backstop_t "$deadline")"; then
     _nightwatch_start_caffeinate -dimsu -t "$bt"
   else
     _nightwatch_start_caffeinate -dimsu

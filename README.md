@@ -173,12 +173,14 @@ local process table read via `ps`. Design choices that keep it tight:
 - **Deterministic parsing.** The public functions run under `emulate -L zsh`, so
   unusual options in your `.zshrc` can't change how arguments are parsed or how
   processes are matched.
-- **Dead-man backstop.** In `awake-away`, the `caffeinate` is launched with a
-  `-t` timeout of the deadline plus a grace margin (`NIGHTWATCH_BACKSTOP_GRACE`,
-  default 4h; accepts `4h`/`30m`/seconds). So even if the watchdog process is
-  killed outright, the keep-awake self-expires instead of pinning the Mac awake
-  indefinitely. The grace preserves staying awake past the deadline while work is
-  still active; set it to `0` to disable.
+- **Dead-man backstop.** In timed modes (`awake-away`, and `awake-goal --max`),
+  the `caffeinate` is launched with a `-t` timeout of the deadline plus a grace
+  margin (`NIGHTWATCH_BACKSTOP_GRACE`, default 4h; accepts `4h`/`30m`/seconds). So
+  even if the watchdog process is killed outright, the keep-awake self-expires
+  instead of pinning the Mac awake indefinitely. The grace is slack on that
+  self-expiry — `awake-away` uses it to keep going past its deadline while work is
+  still active; for the `awake-goal --max` hard cap (which sleeps at the deadline)
+  it only bounds how far a dead watchdog can overshoot. Set it to `0` to disable.
 
 ## State & logs
 
